@@ -39,5 +39,4 @@ Read 2 rows
 
 ### TODO:
 * JSON to CSV
-* Print JSON without using `encoding/json`
 
