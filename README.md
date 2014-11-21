@@ -35,8 +35,3 @@ Output:
 Read 2 rows
 {"a":[1,4],"b":[2,5],"c":[3,6]}
 ```
-
-
-### TODO:
-* JSON to CSV
-

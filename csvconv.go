@@ -3,8 +3,11 @@ package csvconv
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"math"
 	"strconv"
 )
@@ -114,19 +117,23 @@ func (r *Reader) toJSONStruct(out io.Writer, orient JSONOrient, nRows int) (int,
 			if _, err = io.WriteString(out, headerStr); err != nil {
 				return nRead, err
 			}
-			if _, err = out.Write([]byte("[")); err != nil {
+			if _, err = io.WriteString(out, "["); err != nil {
 				return nRead, err
 			}
 			for rowNum := range data[colNum] {
 				val := data[colNum][rowNum]
 				if _, err = strconv.ParseFloat(val, 64); err != nil {
-					val = strconv.Quote(val)
+					if val == "" {
+						val = "null"
+					} else {
+						val = strconv.Quote(val)
+					}
 				}
-				if _, err = out.Write([]byte(val)); err != nil {
+				if _, err = io.WriteString(out, val); err != nil {
 					return nRead, err
 				}
 				if rowNum < len(data[colNum])-1 {
-					if _, err = out.Write([]byte(",")); err != nil {
+					if _, err = io.WriteString(out, ","); err != nil {
 						return nRead, err
 					}
 				}
@@ -173,7 +180,11 @@ func (r *Reader) toJSONStruct(out io.Writer, orient JSONOrient, nRows int) (int,
 					}
 				}
 				if _, err = strconv.ParseFloat(val, 64); err != nil {
-					val = strconv.Quote(val)
+					if val == "" {
+						val = "null"
+					} else {
+						val = strconv.Quote(val)
+					}
 				}
 				keyVal := r.header[colNum] + ":" + val
 				if _, err = io.WriteString(out, keyVal); err != nil {
@@ -204,4 +215,107 @@ func (r *Reader) ToJSON(orient JSONOrient, nRows int) (rowsRead int, jsonData []
 	}
 	jsonData = buf.Bytes()
 	return
+}
+
+type JSONReader struct {
+	headersSet      bool
+	expectedHeaders []string
+}
+
+func NewJSONReader() *JSONReader {
+	return &JSONReader{headersSet: false}
+}
+
+func (d *JSONReader) ToCSV(r io.Reader, sep rune) ([]byte, error) {
+	data, err := ioutil.ReadAll(r)
+	if err != nil {
+		return []byte{}, err
+	}
+	byRecord := []map[string]interface{}{}
+	if nil == json.Unmarshal(data, &byRecord) {
+		return d.parseJSONByRecord(byRecord, sep)
+	}
+	byColumn := map[string][]interface{}{}
+	if nil != json.Unmarshal(data, &byColumn) {
+		return []byte{}, errors.New("JSON does not conform to CSV encodings")
+	}
+	return parseJSONByColumn(byColumn)
+}
+
+func appendIfMissing(slice []string, i string) []string {
+	for _, ele := range slice {
+		if ele == i {
+			return slice
+		}
+	}
+	return append(slice, i)
+}
+
+func (d *JSONReader) parseJSONByRecord(v []map[string]interface{}, sep rune) ([]byte, error) {
+	nRows := len(v)
+	out := bytes.NewBuffer([]byte{})
+	headers := []string{}
+	for _, record := range v {
+		for k := range record {
+			headers = appendIfMissing(headers, k)
+		}
+	}
+	if !d.headersSet {
+		d.headersSet = true
+		d.expectedHeaders = headers
+	} else {
+		contains := func(haystack []string, needle string) bool {
+			for _, v := range haystack {
+				if needle == v {
+					return true
+				}
+			}
+			return false
+		}
+		for _, h := range headers {
+			if !contains(d.expectedHeaders, h) {
+				return []byte{}, errors.New("Object did not contain the proper keys")
+			}
+		}
+		headers = d.expectedHeaders
+	}
+	nCols := len(headers)
+	data := make([][]string, nRows)
+	for i := 0; i < nRows; i++ {
+		data[i] = make([]string, nCols)
+	}
+	for rowNum, record := range v {
+		for colNum, header := range headers {
+			strVal := ""
+			val, ok := record[header]
+			if ok {
+				switch valData := val.(type) {
+				case int:
+					strVal = fmt.Sprintf("%d", valData)
+				case float64:
+					strVal = fmt.Sprintf("%f", valData)
+				case nil:
+					strVal = ""
+				case string:
+					strVal = fmt.Sprintf("%s", valData)
+				default:
+					strVal = fmt.Sprintf("%v", valData)
+				}
+			}
+			data[rowNum][colNum] = strVal
+		}
+	}
+	w := csv.NewWriter(out)
+	w.Comma = sep
+	if err := w.Write(headers); err != nil {
+		return []byte{}, err
+	}
+	if err := w.WriteAll(data); err != nil {
+		return []byte{}, err
+	}
+	return out.Bytes(), nil
+}
+
+func parseJSONByColumn(v map[string][]interface{}) ([]byte, error) {
+	return []byte{}, nil
 }
