@@ -239,7 +239,7 @@ func (d *JSONReader) ToCSV(r io.Reader, sep rune) ([]byte, error) {
 	if nil != json.Unmarshal(data, &byColumn) {
 		return []byte{}, errors.New("JSON does not conform to CSV encodings")
 	}
-	return parseJSONByColumn(byColumn)
+	return d.parseJSONByColumn(byColumn)
 }
 
 func appendIfMissing(slice []string, i string) []string {
@@ -254,6 +254,8 @@ func appendIfMissing(slice []string, i string) []string {
 func (d *JSONReader) parseJSONByRecord(v []map[string]interface{}, sep rune) ([]byte, error) {
 	nRows := len(v)
 	out := bytes.NewBuffer([]byte{})
+	w := csv.NewWriter(out)
+	w.Comma = sep
 	headers := []string{}
 	for _, record := range v {
 		for k := range record {
@@ -278,6 +280,9 @@ func (d *JSONReader) parseJSONByRecord(v []map[string]interface{}, sep rune) ([]
 			}
 		}
 		headers = d.expectedHeaders
+		if err := w.Write(headers); err != nil {
+			return []byte{}, err
+		}
 	}
 	nCols := len(headers)
 	data := make([][]string, nRows)
@@ -305,17 +310,80 @@ func (d *JSONReader) parseJSONByRecord(v []map[string]interface{}, sep rune) ([]
 			data[rowNum][colNum] = strVal
 		}
 	}
-	w := csv.NewWriter(out)
-	w.Comma = sep
-	if err := w.Write(headers); err != nil {
-		return []byte{}, err
-	}
 	if err := w.WriteAll(data); err != nil {
 		return []byte{}, err
 	}
 	return out.Bytes(), nil
 }
 
-func parseJSONByColumn(v map[string][]interface{}) ([]byte, error) {
-	return []byte{}, nil
+func (d *JSONReader) parseJSONByColumn(v map[string][]interface{}) ([]byte, error) {
+	out := bytes.NewBuffer([]byte{})
+	w := csv.NewWriter(out)
+	maxLength := 0
+	keys := make([]string, 0, len(v))
+	colDone := map[string]bool{} // have we read all the values of this col?
+	for k, values := range v {
+		n := len(values)
+		if n > maxLength {
+			maxLength = n
+		}
+		keys = append(keys, k)
+		colDone[k] = false
+	}
+	indexOf := func(slice []string, s string) int {
+		for i := 0; i < len(slice); i++ {
+			if slice[i] == s {
+				return i
+			}
+		}
+		return -1
+	}
+	if d.headersSet {
+		for _, k := range keys {
+			if indexOf(d.expectedHeaders, k) < 0 {
+				return []byte{}, fmt.Errorf("JSON keys did not match expected headers")
+			}
+		}
+		for _, k := range d.expectedHeaders {
+			if _, ok := v[k]; !ok {
+				return []byte{}, fmt.Errorf("JSON missing keys")
+			}
+		}
+	} else {
+		d.expectedHeaders = keys
+		if err := w.Write(keys); err != nil {
+			return []byte{}, err
+		}
+	}
+	colnames := d.expectedHeaders
+	for i := 0; i < maxLength; i++ {
+		row := make([]string, len(colnames))
+		for j, col := range colnames {
+			values := v[col]
+			if len(values) < i {
+				row[j] = ""
+			} else {
+				val := values[i]
+				strVal := ""
+				switch valData := val.(type) {
+				case int:
+					strVal = fmt.Sprintf("%d", valData)
+				case float64:
+					strVal = fmt.Sprintf("%f", valData)
+				case nil:
+					strVal = ""
+				case string:
+					strVal = fmt.Sprintf("%s", valData)
+				default:
+					strVal = fmt.Sprintf("%v", valData)
+				}
+				row[j] = strVal
+			}
+		}
+		if err := w.Write(row); err != nil {
+			return []byte{}, err
+		}
+	}
+
+	return out.Bytes(), nil
 }
