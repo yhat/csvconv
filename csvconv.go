@@ -313,6 +313,7 @@ func (d *JSONReader) parseJSONByRecord(v []map[string]interface{}, sep rune) ([]
 	if err := w.WriteAll(data); err != nil {
 		return []byte{}, err
 	}
+	w.Flush()
 	return out.Bytes(), nil
 }
 
@@ -384,6 +385,6 @@ func (d *JSONReader) parseJSONByColumn(v map[string][]interface{}) ([]byte, erro
 			return []byte{}, err
 		}
 	}
-
+	w.Flush()
 	return out.Bytes(), nil
 }

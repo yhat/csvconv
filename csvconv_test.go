@@ -44,3 +44,30 @@ Resulting output:
 		}
 	}
 }
+
+type toCSVTest struct {
+	output string
+	input  string
+	sep    rune
+	ok     bool
+}
+
+var toCSVTests = []toCSVTest{
+	toCSVTest{"a,b\n1,2\n4,5\n", `{"a":[1,4],"b":[2,5]}`, ',', true},
+	toCSVTest{"a,b\n1,2\n4,\n", `[{"a":1,"b":2},{"a":4,"b":null}]`, ',', true},
+}
+
+func TestToCSV(t *testing.T) {
+	for _, ct := range toCSVTests {
+		r := NewJSONReader()
+		out, err := r.ToCSV(strings.NewReader(ct.input), ct.sep)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		outStr := string(out)
+		if strings.TrimSpace(outStr) == "" {
+			t.Error("got no output from input '%s'", ct.input)
+		}
+	}
+}
